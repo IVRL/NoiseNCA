@@ -10,6 +10,19 @@ def depthwise_conv(x, filters, padding='circular'):
     return y.reshape(b, -1, h, w)
 
 
+def merge_lap(z):
+    # This function merges the lap_x and lap_y into a single laplacian filter
+    b, c, h, w = z.shape
+    z = torch.stack([
+        z[:, ::5],
+        z[:, 1::5],
+        z[:, 2::5],
+        z[:, 3::5] + z[:, 4::5]
+    ],
+        dim=2)  # [b, chn, 4, h, w]
+    return z.reshape(b, -1, h, w)  # [b, 4 * chn, h, w]
+
+
 class NCA(torch.nn.Module):
     """
     Base class for Neural Cellular Automata
@@ -31,13 +44,8 @@ class NCA(torch.nn.Module):
                  noise_level=0.0, update_prob=0.5,
                  device=None):
         super(NCA, self).__init__()
-        self.chn = chn
-        self.fc_dim = fc_dim
-        self.padding = padding
-        self.cond_chn = cond_chn
-        self.update_prob = update_prob
-
-        self.device = device
+        self.chn, self.fc_dim, self.padding, self.cond_chn, = chn, fc_dim, padding, cond_chn
+        self.update_prob, self.device = update_prob, device
 
         self.w1 = torch.nn.Conv2d(chn * 4 + cond_chn, fc_dim, 1, bias=True, device=device)
         self.w2 = torch.nn.Conv2d(fc_dim, chn, 1, bias=False, device=device)
@@ -54,30 +62,19 @@ class NCA(torch.nn.Module):
 
     def perception(self, s, dx=1.0, dy=1.0):
         """
-        :param s: Cell states tensor of shape [b, chn, h, w]
-        :param dx: Either a float or a tensor of shape [b, h, w]
-        :param dy: Either a float or a tensor of shape [b, h, w]
-
+        Computes the perception vector for each cell given the current cell states s.
         dx, dy are used to scale the sobel and laplacian filters.
         dx, dy < 1.0 means that the patterns are gonna get stretched horizontally, vertically.
         dx, dy > 1.0 means that the patterns are gonna get squeezed horizontally, vertically.
-        """
 
-        def transform(x):
-            # This function merges the lap_x and lap_y into a single laplacian filter
-            b, c, h, w = x.shape
-            x = torch.stack([
-                x[:, ::5],
-                x[:, 1::5],
-                x[:, 2::5],
-                x[:, 3::5] + x[:, 4::5]
-            ],
-                dim=2)  # [b, chn, 4, h, w]
-            return x.reshape(b, -1, h, w)  # [b, 4 * chn, h, w]
+        :param s: Cell states tensor of shape [b, chn, h, w]
+        :param dx: Either a float or a tensor of shape [b, h, w]
+        :param dy: Either a float or a tensor of shape [b, h, w]
+        """
 
         z = depthwise_conv(s, self.filters, self.padding)  # [b, 5 * chn, h, w]
         if dx == 1.0 and dy == 1.0:
-            return transform(z)
+            return merge_lap(z)
 
         if not isinstance(dx, torch.Tensor) or dx.ndim != 3:
             dx = torch.tensor([dx], device=s.device)[:, None, None]  # [1, 1, 1]
@@ -87,20 +84,16 @@ class NCA(torch.nn.Module):
         scale = 1.0 / torch.stack([torch.ones_like(dx), dx, dy, dx ** 2, dy ** 2], dim=1)
         scale = torch.tile(scale, (1, self.chn, 1, 1))
         z = z * scale
-        # z[:, ::5] the identity filter is not scaled
-        # z[:, 1::5] = z[:, 1::5] * dx (resembling 1st order derivative in x direction)
-        # z[:, 2::5] = z[:, 2::5] * dy (resembling 1st order derivative in y direction)
-        # z[:, 3::5] = z[:, 3::5] * dx ** 2 (resembling 2nd order derivative in x direction)
-        # z[:, 4::5] = z[:, 4::5] * dy ** 2 (resembling 2nd order derivative in y direction)
-        return transform(z)
+        return merge_lap(z)
 
     def adaptation(self, s, dx=1.0, dy=1.0):
+        """Computes the residual update given current cell states s"""
         z = self.perception(s, dx, dy)
-        print(z.shape)
         delta_s = self.w2(torch.relu(self.w1(z)))
         return delta_s
 
     def step_euler(self, s, dx=1.0, dy=1.0, dt=1.0):
+        """Computes one step of the NCA update using the Euler integrator."""
         delta_s = self.adaptation(s, dx, dy)
         M = 1.0
         if self.update_prob < 1.0:
@@ -110,6 +103,7 @@ class NCA(torch.nn.Module):
         return s + delta_s * M * dt
 
     def step_rk4(self, s, dx=1.0, dy=1.0, dt=1.0):
+        """Computes one step of the NCA update using the 4th order Runge-Kutta integrator."""
         M = 1.0
         if self.update_prob < 1.0:
             b, _, h, w = s.shape
@@ -123,13 +117,13 @@ class NCA(torch.nn.Module):
 
     def forward(self, s, dx=1.0, dy=1.0, dt=1.0, integrator='euler'):
         """
+        Computes one step of the NCA update rule using the specified integrator.
+
         :param s: Cell states tensor of shape [b, chn, h, w]
         :param dx: Either a float or a tensor of shape [b, h, w]
         :param dy: Either a float or a tensor of shape [b, h, w]
         :param dt: Time step used for integration. Must be a float value <= 1.0
         :param integrator: Integration method. Either 'euler' or 'rk4'
-
-        :return s: Updated cell states tensor of shape [b, chn, h, w]
         """
         if integrator == 'euler':
             return self.step_euler(s, dx, dy, dt)
@@ -139,9 +133,11 @@ class NCA(torch.nn.Module):
             raise ValueError("Invalid integrator. Must be either 'euler' or 'rk4'")
 
     def seed(self, n, h=128, w=128):
+        """Starting cell state"""
         return (torch.rand(n, self.chn, h, w, device=self.device) - 0.5) * self.noise_level
 
     def to_rgb(self, s):
+        """Converts the cell state to RGB. The offset of 0.5 is added so that the valid values are in [0, 1] range."""
         return s[..., :3, :, :] + 0.5
 
     def to(self, *args, **kwargs):
