@@ -25,40 +25,42 @@ def merge_lap(z):
 
 class NCA(torch.nn.Module):
     """
-    Base class for Neural Cellular Automata
-
-    chn: Number of channels in the cell state
-    fc_dim: Number of channels in the update MLP hidden layer
-    padding: Padding mode for the perception (Convolution kernels)
-    cond_chn: Number of conditional channels. For example a 2D positional encoding will add 2 extra condition channels.
-    noise_level: Noise level for the seed initialization. 0.0 means that the seed is initialized with zeros.
-                 noise_level = 1.0 means that the seed is initialized with uniform noise in [-0.5, 0.5].
-    update_prob: Probability of updating a cell state in each iteration.
-                 If update_prob = 1.0, all the cells are updated in each iteration.
-    device: PyTorch device
-
+    Base class for Neural Cellular Automata.
+    The functionalities to change the scale of perception filters and to add conditional channels are included in
+    the base class. The extensions such as NoiseNCA and PENCA are implemented by inheriting from this class.
     """
 
     def __init__(self, chn, fc_dim,
-                 padding='circular', cond_chn=0,
-                 noise_level=0.0, update_prob=0.5,
-                 device=None):
+                 padding='circular', perception_kernels=4,
+                 cond_chn=0, update_prob=0.5, device=None):
+        """
+        chn: Number of channels in the cell state
+        fc_dim: Number of channels in the update MLP hidden layer
+        padding: Padding mode for the perception (Convolution kernels)
+        perception_kernels: Number of perception kernels. The baseline NCA uses 4 kernels: Identity, Sobel X, Sobel Y, Laplacian
+        cond_chn: Number of conditional channels.
+                  For example a 2D positional encoding will add 2 extra condition channels. If the number of conditional
+                  channels is > 0 then you need to override the adaptation/perception methods and provide the extra condition channels.
+        update_prob: Probability of updating a cell state in each iteration.
+                     If update_prob = 1.0, all the cells are updated in each iteration.
+        device: PyTorch device
+        """
         super(NCA, self).__init__()
-        self.chn, self.fc_dim, self.padding, self.cond_chn, = chn, fc_dim, padding, cond_chn
-        self.update_prob, self.device = update_prob, device
+        self.chn, self.fc_dim, self.padding, self.perception_kernels = chn, fc_dim, padding, perception_kernels
+        self.cond_chn, self.update_prob, self.device = cond_chn, update_prob, device
 
-        self.w1 = torch.nn.Conv2d(chn * 4 + cond_chn, fc_dim, 1, bias=True, device=device)
+        self.w1 = torch.nn.Conv2d(chn * perception_kernels + cond_chn, fc_dim, 1, bias=True, device=device)
         self.w2 = torch.nn.Conv2d(fc_dim, chn, 1, bias=False, device=device)
 
         torch.nn.init.xavier_normal_(self.w1.weight, gain=0.2)
         torch.nn.init.zeros_(self.w2.weight)
 
-        ident = torch.tensor([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]], device=device)
-        sobel_x = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], device=device)
-        lap_x = torch.tensor([[0.5, 0.0, 0.5], [2.0, -6.0, 2.0], [0.5, 0.0, 0.5]], device=device)
+        with torch.no_grad():
+            ident = torch.tensor([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]], device=device)
+            sobel_x = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], device=device)
+            lap_x = torch.tensor([[0.5, 0.0, 0.5], [2.0, -6.0, 2.0], [0.5, 0.0, 0.5]], device=device)
 
-        self.register_buffer("noise_level", torch.tensor([noise_level], device=device))
-        self.register_buffer("filters", torch.stack([ident, sobel_x, sobel_x.T, lap_x, lap_x.T]))
+            self.register_buffer("filters", torch.stack([ident, sobel_x, sobel_x.T, lap_x, lap_x.T]))
 
     def perception(self, s, dx=1.0, dy=1.0):
         """
@@ -66,10 +68,6 @@ class NCA(torch.nn.Module):
         dx, dy are used to scale the sobel and laplacian filters.
         dx, dy < 1.0 means that the patterns are gonna get stretched horizontally, vertically.
         dx, dy > 1.0 means that the patterns are gonna get squeezed horizontally, vertically.
-
-        :param s: Cell states tensor of shape [b, chn, h, w]
-        :param dx: Either a float or a tensor of shape [b, h, w]
-        :param dy: Either a float or a tensor of shape [b, h, w]
         """
 
         z = depthwise_conv(s, self.filters, self.padding)  # [b, 5 * chn, h, w]
@@ -134,7 +132,7 @@ class NCA(torch.nn.Module):
 
     def seed(self, n, h=128, w=128):
         """Starting cell state"""
-        return (torch.rand(n, self.chn, h, w, device=self.device) - 0.5) * self.noise_level
+        return torch.zeros(n, self.chn, h, w, device=self.device)
 
     def to_rgb(self, s):
         """Converts the cell state to RGB. The offset of 0.5 is added so that the valid values are in [0, 1] range."""
@@ -146,9 +144,66 @@ class NCA(torch.nn.Module):
         return self
 
 
+class NoiseNCA(NCA):
+    """
+    NoiseNCA model where the seed is initialized with uniform noise.
+    The functionalities to change the scale of the patterns and rate of
+     the pattern formation are implemented in the base NCA class.
+    """
+
+    def __init__(self, chn, fc_dim, noise_level=0.0, **kwargs):
+        """
+        noise_level: Noise level for the seed initialization. 0.0 means that the seed is initialized with zeros.
+                 noise_level = 1.0 means that the seed is initialized with uniform noise in [-0.5, 0.5].
+        """
+        assert "update_prob" not in kwargs, "The update probability is fixed to 1.0 for NoiseNCA."
+        super(NoiseNCA, self).__init__(chn, fc_dim, update_prob=1.0, **kwargs)
+        self.register_buffer("noise_level", torch.tensor([noise_level], device=device))
+
+    def seed(self, n, h=128, w=128):
+        return (torch.rand(n, self.chn, h, w, device=self.device) - 0.5) * self.noise_level
+
+
+class PENCA(NCA):
+    """
+    PENCA is a baseline NCA model with an additional 2D positional encoding as conditional channels.
+    The architecture is a simplified version of DyNCA model https://arxiv.org/abs/2211.11417.
+    """
+
+    def __init__(self, chn, fc_dim, **kwargs):
+        assert "cond_chn" not in kwargs, "The number of conditional channels is fixed to 2 for PENCA."
+        super(PENCA, self).__init__(chn, fc_dim, cond_chn=2, **kwargs)
+
+        self.cached_grid = None
+        self.last_shape = None
+
+    def adaptation(self, s, dx=1.0, dy=1.0):
+        z = self.perception(s, dx, dy)
+
+        if self.cached_grid is None and self.last_shape == s.shape:
+            grid = self.cached_grid
+        else:
+            b, _, h, w = s.shape
+            x = torch.linspace(-1, 1, w, device=s.device)
+            y = torch.linspace(-1, 1, h, device=s.device)
+            xs, ys = torch.arange(h, device=s.device) / h, torch.arange(w, device=s.device) / w
+            xs, ys = 2.0 * (xs - 0.5 + 0.5 / h), 2.0 * (ys - 0.5 + 0.5 / w)
+            xs, ys = xs[None, :, None], ys[None, None, :]
+            grid = torch.zeros((2, h, w), device=s.device, dtype=s.dtype)
+            grid[:1], grid[1: 2] = xs, ys
+            grid = grid.unsqueeze(0).repeat(b, 1, 1, 1)  # [b, 2, h, w]
+            self.last_shape = s.shape
+            self.cached_grid = grid
+
+        z = torch.cat([z, grid], dim=1)
+        delta_s = self.w2(torch.relu(self.w1(z)))
+        return delta_s
+
+
 if __name__ == "__main__":
-    device = torch.device("cpu")
+    device = torch.device("cuda")
     # with torch.no_grad():
-    nca = NCA(12, 96, device=device, noise_level=1.0)
+    # nca = NoiseNCA(12, 96, device=device, noise_level=1.0)
+    nca = PENCA(12, 96, device=device)
     seed = nca.seed(1)
     s = nca(seed)
