@@ -1,0 +1,69 @@
+experiment_name: "NoiseNCA"
+description: "Training NoiseNCA model on all images in data images folder."
+device: "cuda:0"
+
+image_folder: "./data/textures/"
+
+loss:
+  attr:
+    loss_type: "OT"
+
+model:
+  type: "NoiseNCA"
+  noise_levels: { default: 0.10, # This is the default noise level for images that are not listed below
+                  bumpy_0081: 0.25,
+                  bumpy_0169: 0.25,
+                  chequered_0088: 0.25,
+                  cobwebbed_0141: 0.25,
+                  crosshatched_0121: 0.50,
+                  grid_0135: 0.03,
+                  honeycombed_0171: 0.01,
+                  interlaced_0081: 0.25,
+                  spiralled_0040: 0.01,
+                  spiralled_0124: 0.03,
+                  swirly_0005: 0.03,
+                  swirly_0071: 0.50,
+                  woven_0121: 0.25,
+                  flames: 0.25,
+                  sea_2: 1.00,
+                  water_3: 0.25,
+                  chequered_0051: 0.03,
+                  chequered_0212: 0.25,
+                  cracked_0085: 0.03,
+                  cracked_0122: 1.00,
+                  grid_0002: 0.25,
+                  grid_0049: 0.50,
+                  interlaced_0163: 0.25,
+                  interlaced_0172: 0.25,
+                  interlaced_0191: 0.50,
+                  spiralled_0042: 0.25,
+                  spiralled_0112: 0.01,
+                  veined_0106: 0.50,
+                  veined_0141: 0.25,
+                  calm_water_4: 0.25,
+                  smoke_plume_1: 1.00,
+  } # We found these noise levels to work well for the given textures.
+  attr:
+    chn: 12
+    fc_dim: 96
+
+
+training:
+  device: "cuda:0"
+  lr: 0.001
+  batch_size: 4
+  iterations: 30
+  overflow_weight: 10.0
+
+  scheduler:
+    type: "MultiStep"
+    attr:
+      milestones: [ 1000, 2000 ]
+      gamma: 0.5
+
+  nca:
+    pool_size: 256
+    step_range: [ 32, 128 ]
+    inject_seed_step: 8
+
+

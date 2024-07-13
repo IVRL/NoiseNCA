@@ -60,7 +60,7 @@ class NCA(torch.nn.Module):
             sobel_x = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], device=device)
             lap_x = torch.tensor([[0.5, 0.0, 0.5], [2.0, -6.0, 2.0], [0.5, 0.0, 0.5]], device=device)
 
-            self.register_buffer("filters", torch.stack([ident, sobel_x, sobel_x.T, lap_x, lap_x.T]))
+            self.filters = torch.stack([ident, sobel_x, sobel_x.T, lap_x, lap_x.T])
 
     def perception(self, s, dx=1.0, dy=1.0):
         """
@@ -140,6 +140,7 @@ class NCA(torch.nn.Module):
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
+        self.filters = self.filters.to(*args, **kwargs)
         self.device = self.w1.weight.device
         return self
 
@@ -158,7 +159,7 @@ class NoiseNCA(NCA):
         """
         assert "update_prob" not in kwargs, "The update probability is fixed to 1.0 for NoiseNCA."
         super(NoiseNCA, self).__init__(chn, fc_dim, update_prob=1.0, **kwargs)
-        self.register_buffer("noise_level", torch.tensor([noise_level], device=device))
+        self.register_buffer("noise_level", torch.tensor([noise_level], device=self.device))
 
     def seed(self, n, h=128, w=128):
         return (torch.rand(n, self.chn, h, w, device=self.device) - 0.5) * self.noise_level
@@ -184,8 +185,6 @@ class PENCA(NCA):
             grid = self.cached_grid
         else:
             b, _, h, w = s.shape
-            x = torch.linspace(-1, 1, w, device=s.device)
-            y = torch.linspace(-1, 1, h, device=s.device)
             xs, ys = torch.arange(h, device=s.device) / h, torch.arange(w, device=s.device) / w
             xs, ys = 2.0 * (xs - 0.5 + 0.5 / h), 2.0 * (ys - 0.5 + 0.5 / w)
             xs, ys = xs[None, :, None], ys[None, None, :]
@@ -202,8 +201,20 @@ class PENCA(NCA):
 
 if __name__ == "__main__":
     device = torch.device("cuda")
-    # with torch.no_grad():
-    # nca = NoiseNCA(12, 96, device=device, noise_level=1.0)
-    nca = PENCA(12, 96, device=device)
-    seed = nca.seed(1)
-    s = nca(seed)
+    model = NoiseNCA(12, 96, noise_level=0.1, device=device)
+
+    state_dict = torch.load("weights.pt", map_location="cpu")
+    model.load_state_dict(state_dict)
+
+    from tqdm import tqdm
+    from utils.video_utils import VideoWriter
+    with VideoWriter() as vid, torch.no_grad():
+        s = model.seed(1, 512, 512).to(device)
+        for k in tqdm(range(600)):
+            step_n = 8
+            for i in range(step_n):
+                s[:] = model(s)
+
+            img = model.to_rgb(s[0]).permute(1, 2, 0).cpu()
+            vid.add(img)
+
