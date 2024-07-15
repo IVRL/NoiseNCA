@@ -1,0 +1,8 @@
+torch
+torchvision
+gdown
+requests
+moviepy
+pyyaml
+wandb
+tqdm

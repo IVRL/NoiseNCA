@@ -208,6 +208,7 @@ if __name__ == "__main__":
 
     from tqdm import tqdm
     from utils.video_utils import VideoWriter
+
     with VideoWriter() as vid, torch.no_grad():
         s = model.seed(1, 512, 512).to(device)
         for k in tqdm(range(600)):
@@ -217,4 +218,3 @@ if __name__ == "__main__":
 
             img = model.to_rgb(s[0]).permute(1, 2, 0).cpu()
             vid.add(img)
-

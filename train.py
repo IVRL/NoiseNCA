@@ -11,7 +11,8 @@ from loss import TextureLoss
 from models import NCA, NoiseNCA, PENCA
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='cfg/noisenca.yml', help="configuration")
+parser.add_argument('--config', type=str, default='cfg/pe-nca.yml', help="configuration")
+os.environ["WANDB_SILENT"] = "true"
 
 
 def get_nca_model(config, texture_name):
@@ -54,12 +55,15 @@ def main(config):
         texture_name = url.split("/")[-1].split(".")[0]
 
         model_path = os.path.join(config['experiment_path'], f"{texture_name}")
+        try:
+            os.makedirs(model_path)
+        except FileExistsError:
+            pass
 
         if wandb_enabled:
-            wandb.login(key=config['wandb']['key'], relogin=False)
-            wandb.init(project=config['wandb']['project'],
-                       name=config['experiment_name'] + f"-{texture_name}",
-                       dir=model_path, config=config)
+            name = config['experiment_name'] + f"-{texture_name}"
+            wandb_run = wandb.init(project=config['wandb']['project'],
+                                   name=name, dir=model_path, config=config)
 
         if not os.path.exists(model_path):
             os.makedirs(model_path)
@@ -88,7 +92,6 @@ def main(config):
         with torch.no_grad():
             pool = nca.seed(pool_size).to(device)
 
-        loss_log = {'total': [], 'overflow': [], 'texture': []}
         pbar = tqdm(range(iterations), desc=f"Training {idx + 1}/{len(image_paths)} on {texture_name}")
         for epoch in pbar:
             with torch.no_grad():
@@ -105,6 +108,7 @@ def main(config):
             overflow_loss = (x - x.clamp(-1.0, 1.0)).abs().sum()
             texture_loss, texture_loss_per_img = loss_fn(target_image, nca.to_rgb(x))
             loss = texture_loss + alpha * overflow_loss
+
             with torch.no_grad():
                 loss.backward()
                 for p in nca.parameters():
@@ -115,28 +119,28 @@ def main(config):
 
                 pool[batch_idx] = x
 
-            loss_log['total'].append(loss.item())
-            loss_log['overflow'].append(overflow_loss.item())
-            loss_log['texture'].append(texture_loss.item())
             if wandb_enabled:
-                wandb.log(loss_log, step=epoch)
+                loss_log = {
+                    'total': loss.item(),
+                    'overflow': overflow_loss.item(),
+                    'texture': texture_loss.item()
+                }
+                wandb_run.log(loss_log, step=epoch)
 
-                if (epoch + 1) % 10 == 0:
+                if (epoch + 1) % config['training']['log_interval'] == 0:
                     imgs = nca.to_rgb(x[:4]).permute([0, 2, 3, 1]).detach().cpu().numpy()
                     imgs = np.hstack((np.clip(imgs, 0, 1) * 255.0).astype(np.uint8))
-                    wandb.log({'NCA Output': wandb.Image(imgs, caption='NCA Output')}, step=epoch)
+                    wandb_run.log({'NCA Output': wandb.Image(imgs, caption='NCA Output')}, step=epoch)
 
-        # utils.statwrite(a={'loss_log': loss_log}, f=f'{model_path}/stats.json')
         if wandb_enabled:
-            print("Here")
             imgs = nca.to_rgb(x[:4]).permute([0, 2, 3, 1]).detach().cpu().numpy()
             imgs = np.hstack((np.clip(imgs, 0, 1) * 255.0).astype(np.uint8))
-            wandb.log({'Last Output': wandb.Image(imgs, caption='NCA Output in the last step')})
+            wandb_run.log({'Last Output': wandb.Image(imgs, caption='NCA Output in the last step')})
 
         torch.save(nca.state_dict(), f'{model_path}/weights.pt')
 
         if wandb_enabled:
-            wandb.finish()
+            wandb_run.finish()
         del nca
         del opt
 

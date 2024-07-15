@@ -1,0 +1,36 @@
+experiment_name: "PENCA"
+description: "Training NCA with positional encoding (PENCA) model on all images in data images folder."
+device: "cuda:0"
+
+image_folder: "./data/textures/"
+
+loss:
+  attr:
+    loss_type: "OT"
+
+model:
+  type: "PENCA"
+  attr:
+    chn: 12
+    fc_dim: 96
+
+
+training:
+  device: "cuda:0"
+  lr: 0.001
+  batch_size: 4
+  iterations: 4000
+  overflow_weight: 10.0
+  log_interval: 1000
+
+  scheduler:
+    type: "MultiStep"
+    attr:
+      milestones: [ 1000, 2000 ]
+      gamma: 0.5
+
+  nca:
+    pool_size: 256
+    step_range: [ 32, 128 ]
+    inject_seed_step: 8
+
