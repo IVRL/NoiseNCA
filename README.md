@@ -4,7 +4,7 @@
 
 [//]: # ([![Open In Colab]&#40;https://colab.research.google.com/assets/colab-badge.svg&#41;]&#40;&#41;)
 
-![teaser](data/teaser.png)
+![teaser](data/teaser.jpeg)
 
 Official implementation of the paper titled "NoiseNCA: Noisy Seed Improves Spatio-Temporal Continuity of Neural Cellular
 Automata"
