@@ -1,15 +1,14 @@
-experiment_name: "VanillaNCA"
-description: "Training Vanilla NCA model on all images in data images folder."
+experiment_name: "PENCA"
+description: "Training NCA with positional encoding (PENCA) model on all images in data images folder."
 device: "cuda:0"
 
-image_folder: "./data/textures/"
 
 loss:
   attr:
     loss_type: "OT"
 
 model:
-  type: "NCA"
+  type: "PENCA"
   attr:
     chn: 12
     fc_dim: 96

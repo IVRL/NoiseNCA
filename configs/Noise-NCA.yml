@@ -2,7 +2,6 @@ experiment_name: "NoiseNCA"
 description: "Training NoiseNCA model on all images in data images folder."
 device: "cuda:0"
 
-image_folder: "./data/textures/"
 
 loss:
   attr:

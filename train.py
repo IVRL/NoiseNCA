@@ -11,7 +11,9 @@ from loss import TextureLoss
 from models import NCA, NoiseNCA, PENCA
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='cfg/pe-nca.yml', help="configuration")
+parser.add_argument('--config', type=str, default='configs/Noise-NCA.yml', help="Path to the config file")
+parser.add_argument('--data_dir', type=str, default='data/textures/', help="Texture images directory")
+
 os.environ["WANDB_SILENT"] = "true"
 
 
@@ -42,8 +44,8 @@ def main(config):
     config['model']['attr']['device'] = device
     loss_fn = TextureLoss(**config['loss']['attr']).to(device)
 
-    image_folder = config['image_folder']
-    image_paths = [f"{image_folder}/{f}" for f in os.listdir(image_folder)]
+    data_dir = config['data_dir']
+    image_paths = [f"{data_dir}/{f}" for f in os.listdir(data_dir)]
 
     for idx, url in enumerate(image_paths):
         if "ipynb" in url:
@@ -149,10 +151,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with open(args.config, 'r') as stream:
         config = yaml.load(stream, Loader=yaml.FullLoader)
+
+    config['data_dir'] = args.data_dir
     exp_name = config['experiment_name']
     exp_path = f'results/{exp_name}/'
     config['experiment_path'] = exp_path
     if not os.path.exists(exp_path):
         os.makedirs(exp_path)
-    # os.system(f'cp {args.config} {exp_path}')
     main(config)
