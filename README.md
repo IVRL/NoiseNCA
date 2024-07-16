@@ -1,8 +1,6 @@
 # NoiseNCA (Artificial Life 2024) [[Project Page](https://noisenca.github.io/)]
 
-[![arXiv](https://img.shields.io/badge/arXiv-2108.00946-b31b1b.svg)](https://arxiv.org/abs/2404.06279)
-
-[//]: # ([![Open In Colab]&#40;https://colab.research.google.com/assets/colab-badge.svg&#41;]&#40;&#41;)
+[![arXiv](https://img.shields.io/badge/arXiv-2108.00946-b31b1b.svg)](https://arxiv.org/abs/2404.06279) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IVRL/NoiseNCA/blob/main/colab.ipynb)
 
 ![teaser](data/teaser.jpeg)
 
