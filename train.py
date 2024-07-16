@@ -1,4 +1,5 @@
 import os
+import shutil
 import argparse
 import yaml
 from tqdm import tqdm
@@ -6,6 +7,7 @@ import torch
 import utils.misc as utils
 import numpy as np
 import wandb
+from PIL import Image
 
 from loss import TextureLoss
 from models import NCA, NoiseNCA, PENCA
@@ -57,21 +59,20 @@ def main(config):
         texture_name = url.split("/")[-1].split(".")[0]
 
         model_path = os.path.join(config['experiment_path'], f"{texture_name}")
-        try:
-            os.makedirs(model_path)
-        except FileExistsError:
-            pass
+        log_path = os.path.join(model_path, "logs")
+        if not os.path.exists(model_path):
+            os.makedirs(log_path)
+        elif os.path.exists(os.path.join(model_path, "weights.pt")):
+            print(f"A trained model for {texture_name} exists.")
+            continue
+        else:
+            shutil.rmtree(model_path)
+            os.makedirs(log_path)
 
         if wandb_enabled:
             name = config['experiment_name'] + f"-{texture_name}"
             wandb_run = wandb.init(project=config['wandb']['project'],
-                                   name=name, dir=model_path, config=config)
-
-        if not os.path.exists(model_path):
-            os.makedirs(model_path)
-        elif os.path.exists(os.path.join(model_path, "weights.pt")):
-            print(f"A trained model for {texture_name} exists.")
-            continue
+                                   name=name, dir=log_path, config=config)
 
         nca = get_nca_model(config, texture_name).to(device)
 
@@ -121,6 +122,14 @@ def main(config):
 
                 pool[batch_idx] = x
 
+            if (epoch + 1) % config['training']['log_interval'] == 0:
+                imgs = nca.to_rgb(x[:4]).permute([0, 2, 3, 1]).detach().cpu().numpy()
+                imgs = np.hstack((np.clip(imgs, 0, 1) * 255.0).astype(np.uint8))
+                if wandb_enabled:
+                    wandb_run.log({'NCA Output': wandb.Image(imgs, caption='NCA Output')}, step=epoch)
+                else:
+                    Image.fromarray(imgs).save(f'{log_path}/epoch-{epoch}.png')
+
             if wandb_enabled:
                 loss_log = {
                     'total': loss.item(),
@@ -128,16 +137,6 @@ def main(config):
                     'texture': texture_loss.item()
                 }
                 wandb_run.log(loss_log, step=epoch)
-
-                if (epoch + 1) % config['training']['log_interval'] == 0:
-                    imgs = nca.to_rgb(x[:4]).permute([0, 2, 3, 1]).detach().cpu().numpy()
-                    imgs = np.hstack((np.clip(imgs, 0, 1) * 255.0).astype(np.uint8))
-                    wandb_run.log({'NCA Output': wandb.Image(imgs, caption='NCA Output')}, step=epoch)
-
-        if wandb_enabled:
-            imgs = nca.to_rgb(x[:4]).permute([0, 2, 3, 1]).detach().cpu().numpy()
-            imgs = np.hstack((np.clip(imgs, 0, 1) * 255.0).astype(np.uint8))
-            wandb_run.log({'Last Output': wandb.Image(imgs, caption='NCA Output in the last step')})
 
         torch.save(nca.state_dict(), f'{model_path}/weights.pt')
 
@@ -154,7 +153,7 @@ if __name__ == "__main__":
 
     config['data_dir'] = args.data_dir
     exp_name = config['experiment_name']
-    exp_path = f'results/{exp_name}/'
+    exp_path = f'results_new/{exp_name}/'
     config['experiment_path'] = exp_path
     if not os.path.exists(exp_path):
         os.makedirs(exp_path)

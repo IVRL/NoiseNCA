@@ -20,7 +20,7 @@ training:
   batch_size: 4
   iterations: 4000
   overflow_weight: 10.0
-  log_interval: 1000
+  log_interval: 250
 
   scheduler:
     type: "MultiStep"
@@ -32,4 +32,3 @@ training:
     pool_size: 256
     step_range: [ 32, 128 ]
     inject_seed_step: 8
-
