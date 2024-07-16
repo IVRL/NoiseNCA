@@ -57,20 +57,8 @@ python3 train.py --config configs/Noise-NCA.yaml --data_dir data/textures/
 
 ### Config files
 
-Each setting in the config file is explained in the comments.
-Currently, we only support the image-guided training scheme and provide two sample config files for training with PBR
-textures and single RGB textures.
-The configuration and the training code for text-guided and motion-guided training schemes will be released soon.
-
-* `configs/pbr_texture.yaml`: Contains the training settings for PBR textures.
-  You can use this config file when you want MeshNCA to simultaneously learn and synthesize multiple related textures
-  such as the albedo, normal, roughness, height, and ambient occlusion maps.
-* `configs/single_texture.yaml`: Contains the training settings for RGB textures.
-
-#### Example:
-
 The loss_type key in the config file specifies the loss function used for training the model.
-The supported values are `OT`, `Gram`, and 'SlW' for optimal transport, Gram matrix, and sliced Wasserstein loss,
+The supported values are `OT`, `Gram`, and `SlW` for optimal transport, Gram matrix, and sliced Wasserstein loss,
 respectively. In the paper we used the OT loss.
 
 ```yaml
